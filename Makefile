@@ -51,7 +51,7 @@ setup: install-dependencies venv activate-virtualenv install-requirements
 
 ### REQUIREMENTS
 
-install-python-requirements: setup.py check-root
+install-python-requirements: check-root
 	@echo "--> Installing Python development dependencies."
 	pip3 install setuptools
 	for f in `ls requirements/` ; do pip3 install -r requirements/$$f ; done
@@ -194,10 +194,11 @@ bump-major:
 	git describe --tags
 
 release:
-	python setup.py register sdist bdist_wheel upload
+	$(PYTHON) -m build
+	twine upload dist/*
 
 build:
-	$(PYTHON) setup.py sdist bdist_wheel
+	$(PYTHON) -m build
 
 startdb:
 	docker-compose -p $(PROJ) -f docker/docker-compose.yml up -d --no-recreate

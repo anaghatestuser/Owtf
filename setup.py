@@ -2,28 +2,26 @@ import codecs
 import os
 from subprocess import call
 
-from setuptools import setup, find_packages
-
+from setuptools import find_packages, setup
 from setuptools.command.develop import develop
 from setuptools.command.install import install
 
 
 ROOT_DIR = os.path.dirname(os.path.realpath(__file__))
 
-# Extracts the version details
+
 def get_version(init_path):
-    # Read the __init__ file
+    """Extract package version from owtf/__init__.py."""
     with open(init_path, "r+") as f:
         init_page = f.read()
-    # Extract the version from the init file
     for each_line in init_page.splitlines():
         if each_line.startswith("__version__"):
             delimiter = '"' if '"' in each_line else "'"
             return each_line.split(delimiter)[1]
 
 
-def strip_comments(l):
-    return l.split("#", 1)[0].strip()
+def strip_comments(line):
+    return line.split("#", 1)[0].strip()
 
 
 def _pip_requirement(req):
@@ -33,26 +31,18 @@ def _pip_requirement(req):
     return [req]
 
 
-def _reqs(*f):
+def _reqs(*files):
+    req_file = os.path.join(os.getcwd(), "requirements", *files)
     return [
         _pip_requirement(r)
-        for r in (
-            strip_comments(l)
-            for l in open(os.path.join(os.getcwd(), "requirements", *f)).readlines()
-        )
+        for r in (strip_comments(l) for l in open(req_file).readlines())
         if r
     ]
 
 
-def reqs(*f):
-    return [req for subreq in _reqs(*f) for req in subreq]
+def reqs(*files):
+    return [req for subreq in _reqs(*files) for req in subreq]
 
-
-# Absolute path for README.md
-readme_md = read_me = os.path.join(ROOT_DIR, "README.md")
-
-# Long description
-long_description = codecs.open(os.path.abspath("README.md"), "r", "utf-8").read()
 
 post_script = os.path.join(ROOT_DIR, "scripts/install.sh")
 
@@ -70,10 +60,6 @@ class PostInstallCommand(install):
     """Post-installation for installation mode."""
 
     def run(self):
-        # ``do_egg_install`` was removed in modern versions of setuptools but older
-        # releases still expect this compatibility shim.  Use it when available and
-        # otherwise fall back to the default ``install.run`` implementation so the
-        # package can be installed with contemporary tooling such as pip 25.
         installer = getattr(self, "do_egg_install", None)
         if callable(installer):
             installer()
@@ -91,7 +77,7 @@ setup(
     author="Abraham Aranguren",
     author_email="abraham.aranguren@owasp.org",
     description="OWASP+PTES focused try to unite great tools and make pen testing more efficient",
-    long_description=long_description,
+    long_description=codecs.open(os.path.abspath("README.md"), "r", "utf-8").read(),
     packages=find_packages(exclude=["node_modules", "node_modules.*"]),
     include_package_data=True,
     zip_safe=False,
