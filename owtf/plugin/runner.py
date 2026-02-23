@@ -7,13 +7,13 @@ chosen settings.
 """
 import copy
 from collections import defaultdict
-import hashlib
-import importlib.util
+import importlib
 import logging
 import os
 import re
 
 from sqlalchemy.exc import SQLAlchemyError
+from sqlalchemy import exc
 
 from owtf.config import config_handler
 from owtf.db.session import get_scoped_session
@@ -259,18 +259,8 @@ class PluginRunner(object):
         :return: None
         :rtype: None
         """
-        abs_module_path = os.path.join(module_path, module_file)
-        module_stub = os.path.splitext(module_file)[0]
-        module_stub = re.sub(r"[^0-9a-zA-Z_]", "_", module_stub)
-        module_prefix = re.sub(r"[^0-9a-zA-Z_]", "_", module_name) if module_name else "owtf_runtime_plugin"
-        digest = hashlib.md5(abs_module_path.encode("utf-8")).hexdigest()[:10]
-        unique_module_name = "{0}_{1}_{2}".format(module_prefix, module_stub, digest)
-        spec = importlib.util.spec_from_file_location(unique_module_name, abs_module_path)
-        if spec is None or spec.loader is None:
-            abort_framework("Cannot load plugin module from path: {0}".format(abs_module_path))
-        module = importlib.util.module_from_spec(spec)
-        spec.loader.exec_module(module)
-        return module
+        f, filename, desc = importlib.find_module(module_file.split(".")[0], [module_path])
+        return importlib.load_module(module_name, f, filename, desc)
 
     def chosen_plugin(self, session, plugin, show_reason=False):
         """Verify that the plugin has been chosen by the user.
@@ -534,50 +524,48 @@ class PluginRunner(object):
     # TODO(viyatb): Make this run for normal plugin runs
     # This is not called anywhere - why? Seems it was always broken.
     def process_plugins_for_target_list(self, session, plugin_group, status, target_list):
-        """Process plugins for all targets in the list
-        :param plugin_group: Plugin group
-        :type plugin_group: `str`
-        :param status: Plugin exec status
-        :type status: `dict`
-        :param target_list: List of targets
-        :type target_list: `set`
-        :return: None
-        :rtype: None
-        """
+        """Process plugins for all targets in the list."""
         plugin_dir = self.get_plugin_group_dir(plugin_group)
-        if plugin_group == "network":
-            waves = self.portwaves.split(",")
-            waves.append("-1")
-            lastwave = 0
-            for target in target_list:  # For each Target
-                self.scanner.scan_network(target)
-                # Scanning and processing the first part of the ports
-                for i in range(1):
-                    ports = config_handler.get_tcp_ports(lastwave, waves[i])
-                    logging.info("Probing for ports %s", str(ports))
-                    http = self.scanner.probe_network(target, "tcp", ports)
-                    # Tell Config that all Gets/Sets are now target-specific.
-                    target_manager.set_target(target)
-                    for plugin in plugin_group:
-                        self.process_plugin(session=session, plugin_dir=plugin_dir, plugin=plugin, status=status)
-                    lastwave = waves[i]
-                    for http_ports in http:
-                        if http_ports == "443":
-                            self.process_plugins_for_target_list(
-                                session,
-                                "web",
-                                {"SomeAborted": False, "SomeSuccessful": False, "AllSkipped": True},
-                                {"https://{}".format(target.split("//")[1])},
-                            )
-                        else:
-                            self.process_plugins_for_target_list(
-                                session,
-                                "web",
-                                {"SomeAborted": False, "SomeSuccessful": False, "AllSkipped": True},
-                                {target},
-                            )
-        else:
-            pass
+        if plugin_group != "network":
+            return
+
+        waves = self.portwaves.split(",")
+        waves.append("-1")
+        lastwave = 0
+
+        for target in target_list:
+            self.scanner.scan_network(target)
+
+            for wave in waves:
+                ports = config_handler.get_tcp_ports(lastwave, wave)
+                logging.info("Probing for ports %s", ports)
+                http_ports = self.scanner.probe_network(target, "tcp", ports)
+
+                target_manager.set_target(target)
+
+                plugins = get_plugins_by_group(session, plugin_group)
+                for plugin in plugins:
+                    if self.chosen_plugin(session, plugin):
+                        self.process_plugin(
+                            session=session,
+                            plugin_dir=plugin_dir,
+                            plugin=plugin,
+                            status=status,
+                        )
+
+                lastwave = int(wave)
+
+                web_targets = set()
+                host = target.split("//")[-1].split(":")[0] if "//" in target else target
+                for port in http_ports:
+                    protocol = "https" if str(port) == "443" else "http"
+                    web_targets.add(f"{protocol}://{host}:{port}")
+
+                if web_targets:
+                    logging.info("Discovered web services: %s", web_targets)
+                    for web_url in web_targets:
+                        target_manager.add_target(web_url)
+       #removed dead code: else:pass
 
 
 def show_plugin_list(session, group, msg=INTRO_BANNER_GENERAL):
