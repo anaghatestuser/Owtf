@@ -9,7 +9,7 @@ services:
     build:
       context: ..
       dockerfile: docker/Dockerfile.backend
-    command: ["/usr/bin/wait-for-it.sh", "db:5432", "--", "/home/owtf/bin/owtf"]
+    command: ["/bin/bash", "-c", "PYTHONPATH=/home/owtf/owtf /usr/bin/wait-for-it.sh db:5432 -- /home/owtf/bin/owtf"]
     environment:
       - DOCKER=1
       - POSTGRES_USER=owtf_db_user
@@ -24,6 +24,7 @@ services:
       - db
     volumes:
       - ~/.owtf:/home/owtf/.owtf
+      - ..:/home/owtf/owtf
     networks:
       - backend
   owtf-frontend:
