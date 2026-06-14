@@ -35,9 +35,9 @@ TARGET_CONFIG = {
     "host_name": "",
     "host_path": "",
     "url_scheme": "",
-    "port_number": "",  # In str form
+    "port_number": "",
     "host_ip": "",
-    "alternative_ips": "",  # str(list), so it can easily reversed using list(str)
+    "alternative_ips": "",
     "ip_url": "",
     "top_domain": "",
     "top_url": "",
