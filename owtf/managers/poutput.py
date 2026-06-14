@@ -16,7 +16,6 @@ from owtf.models.work import Work
 from owtf.settings import DATE_TIME_FORMAT
 from owtf.utils.file import FileOperations, get_output_dir_target
 from owtf.utils.timer import timer
-from owtf.utils.signals import finding_discovered
 
 
 def plugin_output_exists(session, plugin_key, target_id):
@@ -328,8 +327,6 @@ def save_plugin_output(session, plugin, output, target_id=None):
         )
     )
     session.commit()
-    if plugin.get("owtf_rank", -1) >= 4:
-        finding_discovered.send(__name__, plugin_group=plugin.get("group"), session=session)
 
 
 @target_required

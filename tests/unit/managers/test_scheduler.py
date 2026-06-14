@@ -3,6 +3,8 @@ tests.unit.managers.test_scheduler
 ~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~
 Unit tests for the query-time priority scheduler.
 """
+from sqlalchemy import create_engine, MetaData, Table, Column, Integer, String, Boolean, select
+
 from owtf.managers.scheduler import (
     plugin_priority_expr,
     PLUGIN_TYPE_PRIORITY,
@@ -81,3 +83,65 @@ def test_plugin_priority_expr_returns_sqlalchemy_expression():
     mock = MockPlugin("active", "OWTF-DV-005")
     expr = plugin_priority_expr(mock)
     assert expr is not None
+
+
+def test_get_work_for_target_query_orders_by_priority():
+    """Build minimal Plugin/Work tables and verify plugin_priority_expr()
+    orders the query exactly as get_work_for_target() would.
+    """
+    metadata = MetaData()
+
+    plugins_table = Table(
+        "plugins", metadata,
+        Column("key", String, primary_key=True),
+        Column("code", String),
+        Column("type", String),
+    )
+
+    work_table = Table(
+        "worklist", metadata,
+        Column("id", Integer, primary_key=True, autoincrement=True),
+        Column("target_id", Integer),
+        Column("plugin_key", String),
+        Column("active", Boolean),
+    )
+
+    engine = create_engine("sqlite:///:memory:")
+    metadata.create_all(engine)
+
+    # Insert plugins with different type/risk combinations
+    plugin_rows = [
+        {"key": "passive@OWTF-IG-001", "code": "OWTF-IG-001", "type": "passive"},
+        {"key": "grep@OWTF-WGP-001", "code": "OWTF-WGP-001", "type": "grep"},
+        {"key": "passive@OWTF-DV-005", "code": "OWTF-DV-005", "type": "passive"},
+        {"key": "active@OWTF-CM-003", "code": "OWTF-CM-003", "type": "active"},
+    ]
+
+    with engine.begin() as conn:
+        conn.execute(plugins_table.insert(), plugin_rows)
+        conn.execute(work_table.insert(), [
+            {"target_id": 1, "plugin_key": p["key"], "active": True} for p in plugin_rows
+        ])
+
+        # Run the same query shape as get_work_for_target()
+        query = (
+            select(work_table.c.plugin_key)
+            .select_from(work_table.join(plugins_table, work_table.c.plugin_key == plugins_table.c.key))
+            .where(work_table.c.active.is_(True))
+            .order_by(plugin_priority_expr(plugins_table.c).desc(), work_table.c.id.asc())
+        )
+        results = conn.execute(query).fetchall()
+
+    ordered_keys = [row[0] for row in results]
+
+    # Expected order by score:
+    # passive@OWTF-DV-005   = 20 (passive) + 30 (SQLi)   = 50
+    # active@OWTF-CM-003    = 40 (active)  + 0           = 40
+    # passive@OWTF-IG-001   = 20 (passive) + 0           = 20
+    # grep@OWTF-WGP-001     = 10 (grep)    + 0           = 10
+    assert ordered_keys == [
+        "passive@OWTF-DV-005",
+        "active@OWTF-CM-003",
+        "passive@OWTF-IG-001",
+        "grep@OWTF-WGP-001",
+    ]
