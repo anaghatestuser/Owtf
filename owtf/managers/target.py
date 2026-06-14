@@ -44,7 +44,6 @@ TARGET_CONFIG = {
     "scope": True,
     "max_user_rank": -1,
     "max_owtf_rank": -1,
-    "user_priority": 2,
 }
 
 PATH_CONFIG = {
@@ -279,9 +278,6 @@ def update_target(session, data_dict, target_url=None, id=None):
     # TODO: Updating all related attributes when one attribute is changed
     if data_dict.get("scope", None) is not None:
         target_obj.scope = str2bool(data_dict.get("scope", None))
-    if data_dict.get("user_priority", None) is not None:
-        raw = data_dict.get("user_priority")
-        target_obj.user_priority = int(raw[0] if isinstance(raw, list) else raw)
     session.commit()
 
 
