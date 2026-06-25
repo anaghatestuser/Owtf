@@ -3,22 +3,59 @@ owtf.api.routes
 ~~~~~~~~~~~~~~~
 
 """
+
 import tornado.web
 
+from owtf.api.handlers.api_token import ApiTokenGenerateHandler
+from owtf.api.handlers.auth import (
+    AccountActivationGenerateHandler,
+    AccountActivationValidateHandler,
+    LogInHandler,
+    LogOutHandler,
+    OtpGenerateHandler,
+    OtpVerifyHandler,
+    PasswordChangeHandler,
+    RegisterHandler,
+)
+from owtf.api.handlers.base import FileRedirectHandler
+from owtf.api.handlers.community_plugin import (
+    CommunityPluginApproveHandler,
+    CommunityPluginAuditLogHandler,
+    CommunityPluginDetailHandler,
+    CommunityPluginListHandler,
+    CommunityPluginMeHandler,
+    CommunityPluginRejectHandler,
+    CommunityPluginRunHandler,
+    CommunityPluginTestRunHandler,
+    CommunityPluginUploadHandler,
+)
 from owtf.api.handlers.config import ConfigurationHandler
 from owtf.api.handlers.health import HealthCheckHandler
 from owtf.api.handlers.index import IndexHandler
 from owtf.api.handlers.misc import (
-    ErrorDataHandler,
     DashboardPanelHandler,
+    ErrorDataHandler,
     ProgressBarHandler,
 )
 from owtf.api.handlers.plugin import (
     PluginDataHandler,
     PluginNameOutput,
     PluginOutputHandler,
+    PluginUploadHandler,
 )
-from owtf.api.handlers.base import FileRedirectHandler
+from owtf.api.handlers.proxy import (
+    CertificateDownloadHandler,
+    InterceptionRulesHandler,
+    InterceptorConfigHandler,
+    InterceptorManagementHandler,
+    InterceptorStatusHandler,
+    InterceptorToggleHandler,
+    LiveInterceptorHandler,
+    ProxyHistoryDetailHandler,
+    ProxyHistoryHandler,
+    ProxyStatsHandler,
+    RepeaterRequestHandler,
+)
 from owtf.api.handlers.report import ReportExportHandler
 from owtf.api.handlers.session import OWTFSessionHandler
 from owtf.api.handlers.targets import (
@@ -26,8 +63,6 @@ from owtf.api.handlers.targets import (
     TargetConfigSearchHandler,
     TargetSeverityChartHandler,
 )
-from owtf.files.handlers import StaticFileHandler
-from owtf.utils.file import get_dir_worker_logs
 from owtf.api.handlers.transactions import (
     TransactionDataHandler,
     TransactionHrtHandler,
@@ -36,40 +71,18 @@ from owtf.api.handlers.transactions import (
     URLSearchHandler,
 )
 from owtf.api.handlers.work import WorkerHandler, WorklistHandler, WorklistSearchHandler
-from owtf.api.handlers.auth import (
-    LogInHandler,
-    LogOutHandler,
-    RegisterHandler,
-    AccountActivationGenerateHandler,
-    AccountActivationValidateHandler,
-    OtpGenerateHandler,
-    OtpVerifyHandler,
-    PasswordChangeHandler,
-)
-from owtf.api.handlers.api_token import ApiTokenGenerateHandler
-from owtf.api.handlers.proxy import (
-    ProxyHistoryHandler,
-    ProxyHistoryDetailHandler,
-    ProxyStatsHandler,
-    InterceptorManagementHandler,
-    InterceptorConfigHandler,
-    InterceptorToggleHandler,
-    InterceptorStatusHandler,
-    InterceptionRulesHandler,
-    RepeaterRequestHandler,
-    CertificateDownloadHandler,
-    LiveInterceptorHandler,
-)
 from owtf.db.session import get_scoped_session
+from owtf.files.handlers import StaticFileHandler
 from owtf.models.plugin import Plugin
 from owtf.settings import STATIC_ROOT
+from owtf.utils.file import get_dir_worker_logs
 
 __all__ = ["API_v1_HANDLERS", "UI_HANDLERS"]
 
 session = get_scoped_session()
 plugin_group_re = "(%s)?" % "|".join(Plugin.get_all_plugin_groups(session))
 plugin_type_re = "(%s)?" % "|".join(Plugin.get_all_plugin_types(session))
-plugin_code_re = "([0-9A-Z\-]+)?"
+plugin_code_re = r"([0-9A-Z\-]+)?"
 
 API_v1_HANDLERS = [
     tornado.web.url(r"/api/v1/errors/?([0-9]+)?/?$", ErrorDataHandler, name="errors_api_url"),
@@ -77,6 +90,11 @@ API_v1_HANDLERS = [
         r"/api/v1/sessions/?([0-9]+)?/?(activate|add|remove)?/?$",
         OWTFSessionHandler,
         name="owtf_sessions_api_url",
+    ),
+    tornado.web.url(
+        r"/api/v1/plugins/upload/?$",
+        PluginUploadHandler,
+        name="plugin_upload_url",
     ),
     tornado.web.url(
         r"/api/v1/plugins/?" + plugin_group_re + "/?" + plugin_type_re + "/?" + plugin_code_re + "/?$",
@@ -221,6 +239,54 @@ API_v1_HANDLERS = [
     tornado.web.url(r"/api/v1/repeater/send", RepeaterRequestHandler, name="repeater_send_api_url"),
     tornado.web.url(r"/api/v1/proxy/ca-cert/?$", CertificateDownloadHandler, name="ca_cert_api_url"),
     tornado.web.url(r"/api/v1/proxy/live-interceptor/?$", LiveInterceptorHandler, name="live_interceptor_api_url"),
+    # Community Plugin Marketplace
+    tornado.web.url(
+        r"/api/v1/community-plugins/upload/?$",
+        CommunityPluginUploadHandler,
+        name="community_plugin_upload_url",
+    ),
+    tornado.web.url(
+        r"/api/v1/community-plugins/([0-9]+)/test-run/?$",
+        CommunityPluginTestRunHandler,
+        name="community_plugin_test_run_url",
+    ),
+    # Old /run/ path kept for now so the UI keeps working until it
+    # switches to /test-run/. Same handler underneath.
+    tornado.web.url(
+        r"/api/v1/community-plugins/([0-9]+)/run/?$",
+        CommunityPluginRunHandler,
+        name="community_plugin_run_url",
+    ),
+    tornado.web.url(
+        r"/api/v1/community-plugins/([0-9]+)/approve/?$",
+        CommunityPluginApproveHandler,
+        name="community_plugin_approve_url",
+    ),
+    tornado.web.url(
+        r"/api/v1/community-plugins/([0-9]+)/reject/?$",
+        CommunityPluginRejectHandler,
+        name="community_plugin_reject_url",
+    ),
+    tornado.web.url(
+        r"/api/v1/community-plugins/([0-9]+)/audit/log/?$",
+        CommunityPluginAuditLogHandler,
+        name="community_plugin_audit_log_url",
+    ),
+    tornado.web.url(
+        r"/api/v1/community-plugins/me/?$",
+        CommunityPluginMeHandler,
+        name="community_plugin_me_url",
+    ),
+    tornado.web.url(
+        r"/api/v1/community-plugins/([0-9]+)/?$",
+        CommunityPluginDetailHandler,
+        name="community_plugin_detail_url",
+    ),
+    tornado.web.url(
+        r"/api/v1/community-plugins/?$",
+        CommunityPluginListHandler,
+        name="community_plugin_list_url",
+    ),
 ]
 
 UI_HANDLERS = [
