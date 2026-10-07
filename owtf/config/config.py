@@ -728,7 +728,20 @@ class Config(BaseComponent, ConfigInterface):
         :rtype: `str`
         """
         clean_target_url = target_url.replace("/", "_").replace(":", "").replace("#", "")
-        return os.path.join(self.get_output_dir_target(), clean_target_url)
+        targets_dir = self.get_output_dir_target()
+        target_dir = os.path.normpath(os.path.join(targets_dir, clean_target_url))
+        # The target directory must be a direct child of the targets output
+        # directory. Names such as '', '.', '..' or anything containing a
+        # path separator would escape it (e.g. ':..' -> '..'), so fall back
+        # to a harmless name instead of traversing the filesystem.
+        if os.path.dirname(target_dir) != os.path.normpath(targets_dir):
+            clean_target_url = clean_target_url.replace(".", "_").replace(os.sep, "_")
+            if os.altsep:
+                clean_target_url = clean_target_url.replace(os.altsep, "_")
+            if not clean_target_url:
+                clean_target_url = "_"
+            target_dir = os.path.join(targets_dir, clean_target_url)
+        return target_dir
 
     def create_output_dir_target(self, target_url):
         """Creates output directories for the target URL

@@ -72,14 +72,37 @@ class MyHTTPSHandler(HTTPSHandler):
 # SmartRedirectHandler is courtesy of:
 # http://www.diveintopython.net/http_web_services/redirects.html
 class SmartRedirectHandler(HTTPRedirectHandler):
+    def __init__(self, is_url_in_scope=None):
+        # Scope check used to re-validate redirect targets: the Location
+        # header is chosen by the remote server, so it must not be followed
+        # unless it stays inside the target scope.
+        self.is_url_in_scope = is_url_in_scope
+
+    def redirect_request(self, req, fp, code, msg, headers, newurl):
+        # Choke point for http_error_301/302/303/307 (all delegate here):
+        # refuse to build, and therefore follow, a request to an out of
+        # scope URL.
+        if self.is_url_in_scope is not None:
+            try:
+                in_scope = self.is_url_in_scope(newurl)
+            except Exception:
+                # Fail closed: never follow a redirect that cannot be
+                # verified against the scope.
+                in_scope = False
+            if not in_scope:
+                return None
+        return HTTPRedirectHandler.redirect_request(self, req, fp, code, msg, headers, newurl)
+
     def http_error_301(self, req, fp, code, msg, headers):
         result = HTTPRedirectHandler.http_error_301(self, req, fp, code, msg, headers)
-        result.status = code
+        if result is not None:
+            result.status = code
         return result
 
     def http_error_302(self, req, fp, code, msg, headers):
         result = HTTPRedirectHandler.http_error_302(self, req, fp, code, msg, headers)
-        result.status = code
+        if result is not None:
+            result.status = code
         return result
 
 
@@ -106,14 +129,16 @@ class Requester(BaseComponent, RequesterInterface):
             logging.debug(
                 "WARNING: No outbound proxy selected. It is recommended to "
                 "use an outbound proxy for tactical fuzzing later")
-            self.opener = build_opener(MyHTTPHandler, MyHTTPSHandler, SmartRedirectHandler)
+            self.opener = build_opener(MyHTTPHandler, MyHTTPSHandler,
+                                       SmartRedirectHandler(self.target.is_url_in_scope))
         else:  # All requests must use the outbound proxy.
             logging.debug("Setting up proxy(inbound) for OWTF requests..")
             ip, port = proxy
             proxy_conf = {'http': 'http://%s:%s' % (ip, port), 'https': 'http://%s:%s' % (ip, port)}
             proxy_handler = ProxyHandler(proxy_conf)
             # FIXME: Works except no raw request on https.
-            self.opener = build_opener(proxy_handler, MyHTTPHandler, MyHTTPSHandler, SmartRedirectHandler)
+            self.opener = build_opener(proxy_handler, MyHTTPHandler, MyHTTPSHandler,
+                                       SmartRedirectHandler(self.target.is_url_in_scope))
         install_opener(self.opener)
 
     def log_transactions(self, log_transactions=True):

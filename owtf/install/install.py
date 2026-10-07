@@ -6,6 +6,7 @@ The main install script
 """
 
 import os
+import pwd
 import sys
 import logging
 import shutil
@@ -30,15 +31,6 @@ def create_directory(directory):
             return True
         return False
 
-def run_command(command):
-    """Execute the provided shell command.
-    :param command: (~str) Linux shell command.
-    :return: True - if command executed, and False if not.
-    """
-    logging.info("[*] Running following command")
-    logging.info("%s" % command)
-    return os.system(command)
-
 
 def check_sudo():
     """Checks if the user has sudo access.
@@ -55,31 +47,18 @@ def check_sudo():
         sys.exit(-1)
 
 
-def install_in_directory(directory, command):
-    """Execute a certain command while staying inside one directory.
-    :param directory: (~str) Path of directory in which installation command has to be executed.
-    :param command: (~str) Linux shell command (most likely `wget` here)
-    :return: True - if installation successful or directory already exists, and False if not.
-    """
-    if create_directory(directory):
-        logging.info("[*] Switching to %s" % directory)
-        os.chdir(directory)
-        return run_command(command)
-    else:
-        logging.warn("[!] Directory %s already exists, so skipping installation for this" % directory)
-        return True
-
-
 def install_restricted_from_cfg(config_file, pid, root_dir):
     """Install restricted tools and dependencies which are distro independent.
 
     :param config_file: Path to configuration file having information about restricted content.
     """
-    cp = parser.ConfigParser({"RootDir": root_dir, "Pid": str(pid)})
-    cp.read(config_file)
-    for section in cp.sections():
-        logging.info("[*] Installing %s" % section)
-        install_in_directory(os.path.expanduser(cp.get(section, "directory")), cp.get(section, "command"))
+    # The config file is not trusted input: its per-section "command" values
+    # used to be executed verbatim through a shell with the (usually root)
+    # privileges of this installer, so anyone able to modify the config file
+    # gained arbitrary command execution. Never execute commands read from a
+    # configuration file.
+    logging.warn("[!] Not installing restricted tools from %s: executing commands"
+                 " read from a configuration file is unsafe" % config_file)
 
 
 def is_debian_derivative():

@@ -18,12 +18,20 @@ from owtf.dependency_management.dependency_resolver import BaseComponent
 from owtf.dependency_management.interfaces import TransactionInterface
 from owtf.managers.target import target_required
 from owtf.lib.exceptions import InvalidTransactionReference, InvalidParameterType
+from owtf.constants import DB_DEFAULT_QUERY_LIMIT, DB_MAX_QUERY_LIMIT
 from owtf.http import transaction
 from owtf.db import models
 
 
 # The regex find differs for these types :P
 REGEX_TYPES = ['HEADERS', 'BODY']
+
+# Bounds for the number of rows a single transaction query may return. The
+# limit criteria reaches this code straight from the HTTP API, so the query
+# must always stay bounded: each row carries Text columns (raw_request,
+# response_headers, response_body) and an unbounded .all() exhausts memory.
+DEFAULT_QUERY_LIMIT = 10
+MAX_QUERY_LIMIT = 1000
 
 
 class TransactionManager(BaseComponent, TransactionInterface):
@@ -148,13 +156,16 @@ class TransactionManager(BaseComponent, TransactionInterface):
                         criteria['offset'] = int(criteria['offset'][0])
                     if criteria['offset'] >= 0:
                         query = query.offset(criteria['offset'])
+                # It is too dangerous without a limit argument: default to a
+                # small bounded value and cap attacker-supplied limits.
+                limit = DEFAULT_QUERY_LIMIT  # Default limit value is 10
                 if criteria.get('limit', None):
                     if isinstance(criteria.get('limit'), list):
-                        criteria['limit'] = int(criteria['limit'][0])
-                    if criteria['limit'] >= 0:
-                        query = query.limit(criteria['limit'])
-                else:  # It is too dangerous without a limit argument
-                    query.limit(10)  # Default limit value is 10
+                        criteria['limit'] = criteria['limit'][0]
+                    limit = int(criteria['limit'])
+                    if limit < 0:
+                        limit = DEFAULT_QUERY_LIMIT
+                query = query.limit(min(limit, MAX_QUERY_LIMIT))
             except ValueError:
                 raise InvalidParameterType("Invalid parameter type for transaction db")
         return query

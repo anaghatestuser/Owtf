@@ -6,6 +6,7 @@ The scan_network scans the network for different ports and call network plugins 
 """
 
 import re
+import shlex
 import logging
 
 from owtf.dependency_management.dependency_resolver import BaseComponent
@@ -17,6 +18,11 @@ DNS_INFO_FILE= "%s/01_dns_info" % SCANS_FOLDER
 FAST_SCAN_FILE = "%s/02_fast_scan" % SCANS_FOLDER
 STD_SCAN_FILE = "%s/03_std_scan" % SCANS_FOLDER
 FULL_SCAN_FILE = "%s/04_full_scan" % SCANS_FOLDER
+
+# Values read back from scan output files (e.g. DNS PTR answers) are
+# attacker-controlled: only allow plausible values before shell use.
+VALID_DOMAIN_RE = re.compile(r'^[a-zA-Z0-9][a-zA-Z0-9_.-]*$')
+VALID_DNS_SERVER_RE = re.compile(r'^[0-9a-fA-F:.]+$')
 
 
 class Scanner(BaseComponent):
@@ -43,11 +49,11 @@ class Scanner(BaseComponent):
         if scantype == "full":
             logging.info("Performing Intense Host discovery")
             self.shell.shell_exec("nmap -n -v -sP -PE -PP -PS21,22,23,25,80,443,113,21339 -PA80,113,443,10042"
-                                  " --source_port 53 %s -oA %s" % (target, PING_SWEEP_FILE))
+                                  " --source_port 53 %s -oA %s" % (shlex.quote(target), PING_SWEEP_FILE))
 
         if scantype == "arp":
             logging.info("Performing ARP host discovery")
-            self.shell.shell_exec("nmap -n -v -sP -PR %s -oA %s" % (target, PING_SWEEP_FILE))
+            self.shell.shell_exec("nmap -n -v -sP -PR %s -oA %s" % (shlex.quote(target), PING_SWEEP_FILE))
 
         self.shell.shell_exec('grep Up %s.gnmap | cut -f2 -d\" \" > %s.ips' % (PING_SWEEP_FILE, PING_SWEEP_FILE))
 
@@ -72,10 +78,12 @@ class Scanner(BaseComponent):
         self.shell.shell_exec("rm -f %s" % domain_names)
         num_dns_servers = 0
         for line in file:
-            if line.strip('\n'):
-                dns_server = line.strip('\n')
+            dns_server = line.strip('\n')
+            if VALID_DNS_SERVER_RE.match(dns_server):
+                quoted_dns_server = shlex.quote(dns_server)
                 self.shell.shell_exec("host %s %s | grep 'domain name' | cut -f 5 -d' ' | cut -f 2,3,4,5,6,7 -d. "
-                                      "| sed 's/\.$//' >> %s" % (dns_server, dns_server, domain_names))
+                                      "| sed 's/\.$//' >> %s" % (quoted_dns_server, quoted_dns_server,
+                                                                  domain_names))
                 num_dns_servers += 1
         try:
             file = FileOperations.open(domain_names, owtf_clean=False)
@@ -84,18 +92,24 @@ class Scanner(BaseComponent):
 
         for line in file:
             domain = line.strip('\n')
+            if not VALID_DOMAIN_RE.match(domain):
+                continue
+            quoted_domain = shlex.quote(domain)
+            quoted_dns_server = shlex.quote(dns_server)
             raw_axfr = "%s.%s.%s.axfr.raw" % (file_prefix, dns_server, domain)
-            self.shell.shell_exec("host -l %s %s | grep %s > %s" % (domain, dns_server, domain, raw_axfr))
-            success = self.shell.shell_exec("wc -l %s | cut -f 1  -d ' '" % raw_axfr)
+            quoted_raw_axfr = shlex.quote(raw_axfr)
+            self.shell.shell_exec("host -l %s %s | grep %s > %s" % (quoted_domain, quoted_dns_server,
+                                                                    quoted_domain, quoted_raw_axfr))
+            success = self.shell.shell_exec("wc -l %s | cut -f 1  -d ' '" % quoted_raw_axfr)
             if success > 3:
                 logging.info("Attempting zone transfer on $dns_server using domain %s.. Success!" % domain)
-                axfr = "%s.%s.%s.axfr" % (file_prefix, dns_server, domain)
+                axfr = shlex.quote("%s.%s.%s.axfr" % (file_prefix, dns_server, domain))
                 self.shell.shell_exec("rm -f %s" % axfr)
                 logging.info(self.shell.shell_exec("grep 'has address' %s | cut -f 1,4 -d ' ' | sort -k 2 -t ' ' "
-                                                   "| sed 's/ /#/g'" % raw_axfr))
+                                                   "| sed 's/ /#/g'" % quoted_raw_axfr))
             else:
                 logging.info("Attempting zone transfer on $dns_server using domain %s.. Success!" % domain)
-                self.shell.shell_exec("rm -f %s" % raw_axfr)
+                self.shell.shell_exec("rm -f %s" % quoted_raw_axfr)
         if num_dns_servers == 0:
             return
 

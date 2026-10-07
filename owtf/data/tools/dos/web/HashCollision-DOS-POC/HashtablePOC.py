@@ -49,6 +49,11 @@ import ssl
 import random
 import itertools
 
+try:
+    from html import escape as html_escape  # Python 3
+except ImportError:
+    from cgi import escape as html_escape  # Python 2 fallback
+
 class Payloadgenerator:
     # Maximum recursions when searching for collisionchars
     _recursivemax = 15
@@ -346,7 +351,9 @@ Content-Length: %s\r\n\
                 print("")
             if options.output:
                 f = open(options.output+str(i)+".html", "w")
-                f.write("<!-- "+header+" -->\r\n"+content)
+                # header and content are untrusted remote server data:
+                # HTML-escape them so the saved page cannot carry live markup
+                f.write("<!-- "+html_escape(header)+" -->\r\n"+html_escape(content))
                 f.close()
 
         if url.scheme == "https":
