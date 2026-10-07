@@ -9,9 +9,6 @@ and logging errors for debugging later.
 import logging
 import traceback
 import sys
-import json
-
-import requests
 
 from owtf.dependency_management.dependency_resolver import BaseComponent
 from owtf.dependency_management.interfaces import ErrorHandlerInterface
@@ -156,40 +153,12 @@ class ErrorHandler(BaseComponent, ErrorHandlerInterface):
         :return:
         :rtype: None
         """
+        message = OutputCleaner.sanitize(message)
         if type == 'owtf':
             return self.add_new_bug(message)
         else:
+            message = OutputCleaner.anonymise_command(message)
             output = self.padding + message + self.sub_padding
             cprint(output)
             self.log_error(message)
 
-    def add_github_issue(self, username=None, title=None, body=None, id=None):
-        """Adds the auto-formatted bug and creates an issue on Github
-
-        :param username: Github handle of the user
-        :type username: `str`
-        :param title: Title for the issue to create
-        :type title: `str`
-        :param body: Error message and detailed bug description
-        :type body: `str`
-        :param id: bug to report
-        :type id: `int`
-        :return: The JSON response
-        :rtype: `json`
-        """
-        if id is None or username is None:
-            return False
-        body += "\n\nSubmitted By - @"
-        body += username
-        data = {'title': title, 'body': body}
-        data = json.dumps(data)  # Converted to string.
-        headers = {
-            "Content-Type": "application/json",
-            "Authorization": "token " + self.config.get_val("GITHUB_BUG_REPORTER_TOKEN")
-        }
-        request = requests.post(self.config.get_val("GITHUB_API_ISSUES_URL"), headers=headers, data=data)
-        response = request.json()
-        if request.status_code == 201:
-            self.db_error.update_after_github_report(id, body, True, response["html_url"])
-
-        return response

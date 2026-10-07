@@ -60,9 +60,13 @@ contentType = 'text/html'
 
 ############## FUNCTIONS ###################################
 
+# Escape terminal control chars (ESC, CSI, CR, LF, ...) in untrusted data
+def sanitize(text):
+	return re.sub('[\x00-\x1f\x7f-\x9f]', lambda m: '\\x%02x' % ord(m.group(0)), text)
+
 # Pretty printing
 def zprint(string, flag = '=='):
-	print '[' + flag + '] ' + string
+	print '[' + flag + '] ' + sanitize(string)
 
 # Increment the heuristic score
 def inc_score():
@@ -199,7 +203,11 @@ def debug_and_parse(data):
 
 	# Get data
 	headers = data.info()
-	body = data.read()
+	# The body is fully controlled by the remote server, which may stream
+	# it forever: reading it without a size limit buffers until memory is
+	# exhausted. The body heuristics below only need a small prefix.
+	max_body_size = 1024 * 1024  # 1 MiB
+	body = data.read(max_body_size)
 
 	# Debug
 	if verbosity == 2:
@@ -208,7 +216,10 @@ def debug_and_parse(data):
 
 	# Extract some intersting info
 	codes = BaseHTTPServer.BaseHTTPRequestHandler.responses
-	global_data['StatusCode'][hop] =  str(data.code) + ' ' + codes[data.code][0]
+	# The server is untrusted and may return a status code that is absent
+	# from 'responses' (e.g. 420): use a safe lookup so an unknown code
+	# cannot raise a KeyError and abort the scan.
+	global_data['StatusCode'][hop] =  str(data.code) + ' ' + codes.get(data.code, ('Unknown',))[0]
 	analyse_headers(headers)
 	analyse_body(body)
 
@@ -299,7 +310,7 @@ for k in global_data.keys():
 			inc_score()
 
 		# Then add it to the current string
-		string = string + '\tHop #' + str(i) + " : " + current + '\n'
+		string = string + '\tHop #' + str(i) + " : " + sanitize(current) + '\n'
 		previous = current 
 
 	# Display this key only if values were found

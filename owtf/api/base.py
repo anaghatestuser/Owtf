@@ -11,13 +11,38 @@ import hashlib
 import datetime
 import mimetypes
 import email.utils
-import subprocess
+from collections import deque
 
 import tornado.web
 import tornado.template
 from tornado.escape import url_escape
 
+try:
+    from urllib.parse import urlparse
+except ImportError:
+    from urlparse import urlparse
+
 from owtf.dependency_management.dependency_resolver import BaseComponent, ServiceLocator
+
+
+def set_same_host_cors_headers(handler):
+    """Emit CORS headers only for origins served by this OWTF instance.
+
+    The UI server and the file server run on the same host (different
+    ports), so a first-party origin always matches the hostname of the
+    request's Host header. Any other origin receives no
+    Access-Control-Allow-Origin header and is therefore blocked by the
+    browser's same-origin policy.
+    """
+    origin = handler.request.headers.get("Origin")
+    if not origin:
+        return
+    origin_hostname = urlparse(origin).hostname
+    request_hostname = urlparse("//" + handler.request.host).hostname
+    if origin_hostname and request_hostname and origin_hostname.lower() == request_hostname.lower():
+        handler.set_header("Access-Control-Allow-Origin", origin)
+        handler.set_header("Access-Control-Allow-Methods", "GET, POST, DELETE")
+        handler.add_header("Vary", "Origin")
 
 
 class APIRequestHandler(tornado.web.RequestHandler, BaseComponent):
@@ -51,10 +76,6 @@ class FileRedirectHandler(tornado.web.RequestHandler):
 
 class StaticFileHandler(tornado.web.StaticFileHandler):
 
-    def set_default_headers(self):
-        self.add_header("Access-Control-Allow-Origin", "*")
-        self.add_header("Access-Control-Allow-Methods", "GET, POST, DELETE")
-
     def get(self, path, include_body=True):
         """
         This is an edited method of original class so that we can show
@@ -62,6 +83,13 @@ class StaticFileHandler(tornado.web.StaticFileHandler):
         """
         path = self.parse_url_path(path)
         abspath = os.path.abspath(os.path.join(self.root, path))
+        # The URL path is decoded before it reaches this handler and may
+        # contain ".." segments; make sure the resolved path stays inside
+        # the configured root directory (mirrors the containment check in
+        # tornado's own StaticFileHandler.validate_absolute_path).
+        root = os.path.abspath(self.root)
+        if not (abspath + os.path.sep).startswith(root.rstrip(os.path.sep) + os.path.sep):
+            raise tornado.web.HTTPError(403, "%s is not in root directory", path)
         self.absolute_path = abspath
         if not os.path.exists(abspath):
             raise tornado.web.HTTPError(404)
@@ -135,7 +163,14 @@ class StaticFileHandler(tornado.web.StaticFileHandler):
 
             no_of_lines = self.get_argument("lines", default="-1")
             if no_of_lines != "-1":
-                data = subprocess.check_output(["tail", "-" + no_of_lines, abspath])
+                try:
+                    line_count = int(no_of_lines)
+                except ValueError:
+                    raise tornado.web.HTTPError(400, "Invalid 'lines' argument: must be a non-negative integer")
+                if line_count < 0:
+                    raise tornado.web.HTTPError(400, "Invalid 'lines' argument: must be a non-negative integer")
+                with open(abspath, "rb") as file:
+                    data = b"".join(deque(file, maxlen=line_count))
             else:
                 with open(abspath, "rb") as file:
                     data = file.read()
